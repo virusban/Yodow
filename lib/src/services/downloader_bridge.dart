@@ -173,6 +173,27 @@ class DownloaderBridge {
     File outFile,
   ) async {
     final int expectedBytes = stream.size.totalBytes;
+    int writtenBytes = await _downloadWithExplodeStream(yt, stream, outFile);
+
+    if (writtenBytes <= 0 || writtenBytes < expectedBytes) {
+      if (await outFile.exists()) {
+        await outFile.delete();
+      }
+      writtenBytes = await _downloadWithDirectHttp(stream.url, outFile);
+    }
+
+    if (writtenBytes <= 0 || writtenBytes < expectedBytes) {
+      throw Exception(
+        'Incomplete download for ${outFile.path}. Expected $expectedBytes bytes, got $writtenBytes bytes.',
+      );
+    }
+  }
+
+  Future<int> _downloadWithExplodeStream(
+    YoutubeExplode yt,
+    StreamInfo stream,
+    File outFile,
+  ) async {
     final streamData = yt.videos.streamsClient.get(stream);
     final IOSink sink = outFile.openWrite();
     int writtenBytes = 0;
@@ -182,12 +203,28 @@ class DownloaderBridge {
     }
     await sink.flush();
     await sink.close();
+    return writtenBytes;
+  }
 
-    if (writtenBytes < expectedBytes) {
-      throw Exception(
-        'Incomplete download for ${outFile.path}. Expected $expectedBytes bytes, got $writtenBytes bytes.',
-      );
+  Future<int> _downloadWithDirectHttp(Uri url, File outFile) async {
+    final HttpClient client = HttpClient();
+    final HttpClientRequest request = await client.getUrl(url);
+    request.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0 (Android)');
+    final HttpClientResponse response = await request.close();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      client.close(force: true);
+      throw Exception('Direct stream request failed: HTTP ${response.statusCode}');
     }
+    final IOSink sink = outFile.openWrite();
+    int writtenBytes = 0;
+    await for (final List<int> data in response) {
+      sink.add(data);
+      writtenBytes += data.length;
+    }
+    await sink.flush();
+    await sink.close();
+    client.close(force: true);
+    return writtenBytes;
   }
 
   Future<void> _downloadStreamWithRetry(
