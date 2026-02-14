@@ -62,42 +62,60 @@ class DownloaderBridge {
     required String baseName,
     required MediaFormat format,
   }) async {
-    final AudioOnlyStreamInfo stream = manifest.audioOnly.withHighestBitrate();
-
-    final String inputPath = '${outDir.path}/$baseName.source.${stream.container.name}';
-    final File inputFile = File(inputPath);
-    await _downloadStream(yt, stream, inputFile);
+    final List<AudioOnlyStreamInfo> candidates = manifest.audioOnly.toList()
+      ..sort(
+        (AudioOnlyStreamInfo a, AudioOnlyStreamInfo b) =>
+            b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond),
+      );
+    if (candidates.isEmpty) {
+      return const DownloadResult(success: false, message: 'No audio stream found.');
+    }
 
     final String outputPath = '${outDir.path}/$baseName.${format.name}';
     final String thumbPath = '${outDir.path}/$baseName.thumb.jpg';
     await _downloadThumbnail(video.thumbnails.highResUrl, File(thumbPath));
 
-    final List<String> ffmpegArgs = _audioArguments(
-      inputPath: inputPath,
-      outputPath: outputPath,
-      thumbPath: thumbPath,
-      format: format,
-      title: video.title,
-      artist: video.author,
-    );
+    String lastError = 'Unknown error';
+    for (final AudioOnlyStreamInfo stream in candidates.take(3)) {
+      final String inputPath = '${outDir.path}/$baseName.source.${stream.container.name}';
+      final File inputFile = File(inputPath);
+      try {
+        await _downloadStreamWithRetry(yt, stream, inputFile);
 
-    final session = await FFmpegKit.executeWithArguments(ffmpegArgs);
-    final returnCode = await session.getReturnCode();
+        final List<String> ffmpegArgs = _audioArguments(
+          inputPath: inputPath,
+          outputPath: outputPath,
+          thumbPath: thumbPath,
+          format: format,
+          title: video.title,
+          artist: video.author,
+        );
 
-    if (await inputFile.exists()) {
-      await inputFile.delete();
+        final session = await FFmpegKit.executeWithArguments(ffmpegArgs);
+        final returnCode = await session.getReturnCode();
+        if (ReturnCode.isSuccess(returnCode)) {
+          return DownloadResult(success: true, message: 'Done: $outputPath');
+        }
+
+        lastError = await session.getAllLogsAsString() ?? 'No ffmpeg logs available.';
+      } catch (error) {
+        lastError = error.toString();
+      } finally {
+        if (await inputFile.exists()) {
+          await inputFile.delete();
+        }
+      }
     }
+
     final File thumbFile = File(thumbPath);
     if (await thumbFile.exists()) {
       await thumbFile.delete();
     }
 
-    if (ReturnCode.isSuccess(returnCode)) {
-      return DownloadResult(success: true, message: 'Done: $outputPath');
-    }
-
-    final logs = await session.getAllLogsAsString();
-    return DownloadResult(success: false, message: 'FFmpeg failed.\n$logs');
+    return DownloadResult(
+      success: false,
+      message: 'FFmpeg failed after stream retries.\n$lastError',
+    );
   }
 
   Future<DownloadResult> _downloadVideo({
@@ -118,7 +136,7 @@ class DownloaderBridge {
     final String tempPath = '${outDir.path}/$baseName.source.${selectedStream.container.name}';
     final String outputPath = '${outDir.path}/$baseName.${format.name}';
 
-    await _downloadStream(yt, selectedStream, File(tempPath));
+    await _downloadStreamWithRetry(yt, selectedStream, File(tempPath));
 
     if (selectedStream.container.name == format.name) {
       await File(tempPath).rename(outputPath);
@@ -152,13 +170,43 @@ class DownloaderBridge {
     StreamInfo stream,
     File outFile,
   ) async {
+    final int expectedBytes = stream.size.totalBytes;
     final streamData = yt.videos.streamsClient.get(stream);
     final IOSink sink = outFile.openWrite();
+    int writtenBytes = 0;
     await for (final List<int> data in streamData) {
       sink.add(data);
+      writtenBytes += data.length;
     }
     await sink.flush();
     await sink.close();
+
+    if (writtenBytes < expectedBytes) {
+      throw Exception(
+        'Incomplete download for ${outFile.path}. Expected $expectedBytes bytes, got $writtenBytes bytes.',
+      );
+    }
+  }
+
+  Future<void> _downloadStreamWithRetry(
+    YoutubeExplode yt,
+    StreamInfo stream,
+    File outFile,
+  ) async {
+    const int maxAttempts = 3;
+    Object? lastError;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        if (await outFile.exists()) {
+          await outFile.delete();
+        }
+        await _downloadStream(yt, stream, outFile);
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw Exception('Download failed after $maxAttempts attempts: $lastError');
   }
 
   Future<void> _downloadThumbnail(String url, File outFile) async {
