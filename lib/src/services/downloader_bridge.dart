@@ -25,7 +25,9 @@ class DownloaderBridge {
   }) async {
     final YoutubeExplode yt = YoutubeExplode();
     try {
+      onProgress?.call(0.01, 'Preparing...');
       final Video video = await yt.videos.get(url);
+      onProgress?.call(0.03, 'Fetching streams...');
       final StreamManifest manifest = await _getRobustManifest(yt, video.id);
       final Directory outDir = Directory(outputDirectoryPath);
       await outDir.create(recursive: true);
@@ -79,6 +81,7 @@ class DownloaderBridge {
 
     final String outputPath = '${outDir.path}/$baseName.${format.name}';
     final String thumbPath = '${outDir.path}/$baseName.thumb.jpg';
+    onProgress?.call(0.06, 'Downloading thumbnail...');
     await _downloadThumbnail(video.thumbnails.highResUrl, File(thumbPath));
 
     String lastError = 'Unknown error';
@@ -145,6 +148,7 @@ class DownloaderBridge {
     final String tempPath = '${outDir.path}/$baseName.source.${selectedStream.container.name}';
     final String outputPath = '${outDir.path}/$baseName.${format.name}';
 
+    onProgress?.call(0.06, 'Starting download...');
     await _downloadStreamWithRetry(yt, selectedStream, File(tempPath), onProgress: onProgress);
 
     if (selectedStream.container.name == format.name) {

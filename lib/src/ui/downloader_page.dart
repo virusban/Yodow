@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,9 +24,12 @@ class _DownloaderPageState extends State<DownloaderPage> {
   String? _saveDirectoryPath;
   String _status = 'Ready';
   double _progress = 0.0;
+  Timer? _progressHeartbeat;
+  DateTime _lastProgressUpdate = DateTime.now();
 
   @override
   void dispose() {
+    _progressHeartbeat?.cancel();
     _urlController.dispose();
     super.dispose();
   }
@@ -52,7 +56,9 @@ class _DownloaderPageState extends State<DownloaderPage> {
       _isRunning = true;
       _status = 'Processing...';
       _progress = 0.0;
+      _lastProgressUpdate = DateTime.now();
     });
+    _startProgressHeartbeat();
 
     try {
       final DownloadResult result = await _bridge.download(
@@ -67,6 +73,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
             final double next = value.clamp(0.0, 1.0);
             _progress = next > _progress ? next : _progress;
             _status = '$stage ${(_progress * 100).toStringAsFixed(0)}%';
+            _lastProgressUpdate = DateTime.now();
           });
         },
       );
@@ -81,12 +88,31 @@ class _DownloaderPageState extends State<DownloaderPage> {
         _status = 'Error: $error';
       });
     } finally {
+      _progressHeartbeat?.cancel();
       if (mounted) {
         setState(() {
           _isRunning = false;
         });
       }
     }
+  }
+
+  void _startProgressHeartbeat() {
+    _progressHeartbeat?.cancel();
+    _progressHeartbeat = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
+      if (!mounted || !_isRunning) {
+        timer.cancel();
+        return;
+      }
+      final Duration idle = DateTime.now().difference(_lastProgressUpdate);
+      if (idle.inSeconds < 2 || _progress >= 0.85) {
+        return;
+      }
+      setState(() {
+        _progress = (_progress + 0.01).clamp(0.0, 0.85);
+        _status = 'Working... ${(_progress * 100).toStringAsFixed(0)}%';
+      });
+    });
   }
 
   Future<bool> _ensureStoragePermission() async {
