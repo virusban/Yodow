@@ -60,7 +60,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('yt-dlp Flutter Android'),
+        title: const Text('YouTube Downloader'),
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
