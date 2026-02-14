@@ -32,7 +32,7 @@ class DownloaderBridge {
       final String baseName = _safeName(video.title);
 
       if (format.isAudio) {
-        return _downloadAudio(
+        return await _downloadAudio(
           yt: yt,
           video: video,
           manifest: manifest,
@@ -42,7 +42,7 @@ class DownloaderBridge {
         );
       }
 
-      return _downloadVideo(
+      return await _downloadVideo(
         yt: yt,
         manifest: manifest,
         outDir: outDir,
