@@ -22,6 +22,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
   bool _isRunning = false;
   String? _saveDirectoryPath;
   String _status = 'Ready';
+  double _progress = 0.0;
 
   @override
   void dispose() {
@@ -50,6 +51,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
     setState(() {
       _isRunning = true;
       _status = 'Processing...';
+      _progress = 0.0;
     });
 
     try {
@@ -57,9 +59,21 @@ class _DownloaderPageState extends State<DownloaderPage> {
         url: url,
         format: _format,
         outputDirectoryPath: _saveDirectoryPath!,
+        onProgress: (double value, String stage) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _progress = value.clamp(0.0, 1.0);
+            _status = '$stage ${(_progress * 100).toStringAsFixed(0)}%';
+          });
+        },
       );
       setState(() {
         _status = result.message;
+        if (result.success) {
+          _progress = 1.0;
+        }
       });
     } catch (error) {
       setState(() {
@@ -176,6 +190,10 @@ class _DownloaderPageState extends State<DownloaderPage> {
               onPressed: (_isRunning || _saveDirectoryPath == null) ? null : _startDownload,
               child: Text(_isRunning ? 'Working...' : 'Download'),
             ),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: _progress),
+            const SizedBox(height: 4),
+            Text('${(_progress * 100).toStringAsFixed(0)}%'),
             const SizedBox(height: 20),
             const Text('Status', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),

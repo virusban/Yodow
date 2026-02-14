@@ -21,6 +21,7 @@ class DownloaderBridge {
     required String url,
     required MediaFormat format,
     required String outputDirectoryPath,
+    void Function(double value, String stage)? onProgress,
   }) async {
     final YoutubeExplode yt = YoutubeExplode();
     try {
@@ -39,6 +40,7 @@ class DownloaderBridge {
           outDir: outDir,
           baseName: baseName,
           format: format,
+          onProgress: onProgress,
         );
       }
 
@@ -48,6 +50,7 @@ class DownloaderBridge {
         outDir: outDir,
         baseName: baseName,
         format: format,
+        onProgress: onProgress,
       );
     } catch (error) {
       return DownloadResult(success: false, message: 'Error: $error');
@@ -63,6 +66,7 @@ class DownloaderBridge {
     required Directory outDir,
     required String baseName,
     required MediaFormat format,
+    void Function(double value, String stage)? onProgress,
   }) async {
     final List<AudioOnlyStreamInfo> candidates = manifest.audioOnly.toList()
       ..sort(
@@ -82,7 +86,8 @@ class DownloaderBridge {
       final String inputPath = '${outDir.path}/$baseName.source.${stream.container.name}';
       final File inputFile = File(inputPath);
       try {
-        await _downloadStreamWithRetry(yt, stream, inputFile);
+        await _downloadStreamWithRetry(yt, stream, inputFile, onProgress: onProgress);
+        onProgress?.call(0.92, 'Converting...');
 
         final List<String> ffmpegArgs = _audioArguments(
           inputPath: inputPath,
@@ -96,6 +101,7 @@ class DownloaderBridge {
         final session = await FFmpegKit.executeWithArguments(ffmpegArgs);
         final returnCode = await session.getReturnCode();
         if (ReturnCode.isSuccess(returnCode)) {
+          onProgress?.call(1.0, 'Completed');
           return DownloadResult(success: true, message: 'Done: $outputPath');
         }
 
@@ -126,6 +132,7 @@ class DownloaderBridge {
     required Directory outDir,
     required String baseName,
     required MediaFormat format,
+    void Function(double value, String stage)? onProgress,
   }) async {
     MuxedStreamInfo? stream = manifest.muxed
         .where((MuxedStreamInfo s) => s.container.name == format.name)
@@ -138,13 +145,15 @@ class DownloaderBridge {
     final String tempPath = '${outDir.path}/$baseName.source.${selectedStream.container.name}';
     final String outputPath = '${outDir.path}/$baseName.${format.name}';
 
-    await _downloadStreamWithRetry(yt, selectedStream, File(tempPath));
+    await _downloadStreamWithRetry(yt, selectedStream, File(tempPath), onProgress: onProgress);
 
     if (selectedStream.container.name == format.name) {
       await File(tempPath).rename(outputPath);
+      onProgress?.call(1.0, 'Completed');
       return DownloadResult(success: true, message: 'Done: $outputPath');
     }
 
+    onProgress?.call(0.92, 'Converting...');
     final session = await FFmpegKit.executeWithArguments(<String>[
       '-y',
       '-i',
@@ -160,6 +169,7 @@ class DownloaderBridge {
     }
 
     if (ReturnCode.isSuccess(returnCode)) {
+      onProgress?.call(1.0, 'Completed');
       return DownloadResult(success: true, message: 'Done: $outputPath');
     }
 
@@ -171,15 +181,17 @@ class DownloaderBridge {
     YoutubeExplode yt,
     StreamInfo stream,
     File outFile,
+    void Function(double value, String stage)? onProgress,
   ) async {
     final int expectedBytes = stream.size.totalBytes;
-    int writtenBytes = await _downloadWithExplodeStream(yt, stream, outFile);
+    int writtenBytes =
+        await _downloadWithExplodeStream(yt, stream, outFile, expectedBytes, onProgress);
 
     if (writtenBytes <= 0 || writtenBytes < expectedBytes) {
       if (await outFile.exists()) {
         await outFile.delete();
       }
-      writtenBytes = await _downloadWithDirectHttp(stream.url, outFile);
+      writtenBytes = await _downloadWithDirectHttp(stream.url, outFile, expectedBytes, onProgress);
     }
 
     if (writtenBytes <= 0 || writtenBytes < expectedBytes) {
@@ -193,6 +205,8 @@ class DownloaderBridge {
     YoutubeExplode yt,
     StreamInfo stream,
     File outFile,
+    int expectedBytes,
+    void Function(double value, String stage)? onProgress,
   ) async {
     final streamData = yt.videos.streamsClient.get(stream);
     final IOSink sink = outFile.openWrite();
@@ -200,13 +214,19 @@ class DownloaderBridge {
     await for (final List<int> data in streamData) {
       sink.add(data);
       writtenBytes += data.length;
+      _emitDownloadProgress(onProgress, writtenBytes, expectedBytes);
     }
     await sink.flush();
     await sink.close();
     return writtenBytes;
   }
 
-  Future<int> _downloadWithDirectHttp(Uri url, File outFile) async {
+  Future<int> _downloadWithDirectHttp(
+    Uri url,
+    File outFile,
+    int expectedBytes,
+    void Function(double value, String stage)? onProgress,
+  ) async {
     final HttpClient client = HttpClient();
     final HttpClientRequest request = await client.getUrl(url);
     request.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0');
@@ -225,6 +245,7 @@ class DownloaderBridge {
     await for (final List<int> data in response) {
       sink.add(data);
       writtenBytes += data.length;
+      _emitDownloadProgress(onProgress, writtenBytes, expectedBytes);
     }
     await sink.flush();
     await sink.close();
@@ -236,6 +257,7 @@ class DownloaderBridge {
     YoutubeExplode yt,
     StreamInfo stream,
     File outFile,
+    {void Function(double value, String stage)? onProgress}
   ) async {
     const int maxAttempts = 3;
     Object? lastError;
@@ -245,7 +267,8 @@ class DownloaderBridge {
         if (await outFile.exists()) {
           await outFile.delete();
         }
-        await _downloadStream(yt, currentStream, outFile);
+        onProgress?.call(0.0, 'Downloading...');
+        await _downloadStream(yt, currentStream, outFile, onProgress);
         return;
       } catch (error) {
         lastError = error;
@@ -285,6 +308,20 @@ class DownloaderBridge {
       }
     }
     return null;
+  }
+
+  void _emitDownloadProgress(
+    void Function(double value, String stage)? onProgress,
+    int writtenBytes,
+    int expectedBytes,
+  ) {
+    if (onProgress == null || expectedBytes <= 0) {
+      return;
+    }
+    final double ratio = writtenBytes / expectedBytes;
+    final double clamped = ratio.clamp(0.0, 1.0);
+    // Keep room for post-download conversion phase.
+    onProgress(clamped * 0.9, 'Downloading...');
   }
 
   Future<void> _downloadThumbnail(String url, File outFile) async {
