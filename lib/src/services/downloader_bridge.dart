@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/return_code.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../models/media_format.dart';
@@ -21,12 +20,14 @@ class DownloaderBridge {
   Future<DownloadResult> download({
     required String url,
     required MediaFormat format,
+    required String outputDirectoryPath,
   }) async {
     final YoutubeExplode yt = YoutubeExplode();
     try {
       final Video video = await yt.videos.get(url);
       final StreamManifest manifest = await yt.videos.streamsClient.getManifest(video.id);
-      final Directory outDir = await _resolveOutputDirectory();
+      final Directory outDir = Directory(outputDirectoryPath);
+      await outDir.create(recursive: true);
       final String baseName = _safeName(video.title);
 
       if (format.isAudio) {
@@ -221,14 +222,6 @@ class DownloaderBridge {
     await sink.flush();
     await sink.close();
     client.close(force: true);
-  }
-
-  Future<Directory> _resolveOutputDirectory() async {
-    final Directory? external = await getExternalStorageDirectory();
-    final Directory base = external ?? await getApplicationDocumentsDirectory();
-    final Directory out = Directory('${base.path}/downloads');
-    await out.create(recursive: true);
-    return out;
   }
 
   List<String> _audioArguments({

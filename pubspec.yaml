@@ -12,6 +12,7 @@ dependencies:
   youtube_explode_dart: ^2.5.2
   ffmpeg_kit_flutter_new: ^4.1.0
   path_provider: ^2.1.5
+  file_picker: ^10.3.2
 
 dev_dependencies:
   flutter_test:

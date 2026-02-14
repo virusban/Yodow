@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../models/media_format.dart';
 import '../services/downloader_bridge.dart';
@@ -16,6 +17,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
 
   MediaFormat _format = MediaFormat.mp3;
   bool _isRunning = false;
+  String? _saveDirectoryPath;
   String _status = 'Ready';
 
   @override
@@ -32,6 +34,12 @@ class _DownloaderPageState extends State<DownloaderPage> {
       });
       return;
     }
+    if (_saveDirectoryPath == null || _saveDirectoryPath!.isEmpty) {
+      setState(() {
+        _status = 'Choose a save folder before downloading.';
+      });
+      return;
+    }
 
     setState(() {
       _isRunning = true;
@@ -39,7 +47,11 @@ class _DownloaderPageState extends State<DownloaderPage> {
     });
 
     try {
-      final DownloadResult result = await _bridge.download(url: url, format: _format);
+      final DownloadResult result = await _bridge.download(
+        url: url,
+        format: _format,
+        outputDirectoryPath: _saveDirectoryPath!,
+      );
       setState(() {
         _status = result.message;
       });
@@ -54,6 +66,19 @@ class _DownloaderPageState extends State<DownloaderPage> {
         });
       }
     }
+  }
+
+  Future<void> _pickSaveFolder() async {
+    final String? pickedPath = await FilePicker.platform.getDirectoryPath(
+      dialogTitle: 'Select folder for downloads',
+    );
+    if (!mounted || pickedPath == null || pickedPath.isEmpty) {
+      return;
+    }
+    setState(() {
+      _saveDirectoryPath = pickedPath;
+      _status = 'Save folder selected.';
+    });
   }
 
   @override
@@ -100,8 +125,20 @@ class _DownloaderPageState extends State<DownloaderPage> {
                     },
             ),
             const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _isRunning ? null : _pickSaveFolder,
+              child: const Text('Choose Save Folder'),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _saveDirectoryPath == null
+                  ? 'No folder selected.'
+                  : 'Save to: $_saveDirectoryPath',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
             ElevatedButton(
-              onPressed: _isRunning ? null : _startDownload,
+              onPressed: (_isRunning || _saveDirectoryPath == null) ? null : _startDownload,
               child: Text(_isRunning ? 'Working...' : 'Download'),
             ),
             const SizedBox(height: 20),
