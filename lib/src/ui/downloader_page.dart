@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../models/media_format.dart';
 import '../services/downloader_bridge.dart';
@@ -40,6 +43,9 @@ class _DownloaderPageState extends State<DownloaderPage> {
       });
       return;
     }
+    if (!await _ensureStoragePermission()) {
+      return;
+    }
 
     setState(() {
       _isRunning = true;
@@ -66,6 +72,35 @@ class _DownloaderPageState extends State<DownloaderPage> {
         });
       }
     }
+  }
+
+  Future<bool> _ensureStoragePermission() async {
+    if (!Platform.isAndroid || _saveDirectoryPath == null) {
+      return true;
+    }
+
+    final String path = _saveDirectoryPath!;
+    final bool isSharedStoragePath = path.startsWith('/storage/emulated/0/');
+    if (!isSharedStoragePath) {
+      return true;
+    }
+
+    final PermissionStatus status = await Permission.manageExternalStorage.status;
+    if (status.isGranted) {
+      return true;
+    }
+
+    final PermissionStatus requested = await Permission.manageExternalStorage.request();
+    if (requested.isGranted) {
+      return true;
+    }
+
+    setState(() {
+      _status =
+          'Storage permission is required for this folder. Allow "All files access" and try again.';
+    });
+    await openAppSettings();
+    return false;
   }
 
   Future<void> _pickSaveFolder() async {

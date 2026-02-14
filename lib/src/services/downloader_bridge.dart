@@ -28,6 +28,7 @@ class DownloaderBridge {
       final StreamManifest manifest = await yt.videos.streamsClient.getManifest(video.id);
       final Directory outDir = Directory(outputDirectoryPath);
       await outDir.create(recursive: true);
+      await _assertWritableDirectory(outDir);
       final String baseName = _safeName(video.title);
 
       if (format.isAudio) {
@@ -222,6 +223,22 @@ class DownloaderBridge {
     await sink.flush();
     await sink.close();
     client.close(force: true);
+  }
+
+  Future<void> _assertWritableDirectory(Directory directory) async {
+    final File probe = File('${directory.path}/.write_test_${DateTime.now().millisecondsSinceEpoch}');
+    try {
+      await probe.writeAsString('ok');
+    } on FileSystemException catch (error) {
+      throw Exception(
+        'Cannot write to selected folder: ${directory.path}. '
+        'Please pick another folder or grant storage access. Details: ${error.osError?.message ?? error.message}',
+      );
+    } finally {
+      if (await probe.exists()) {
+        await probe.delete();
+      }
+    }
   }
 
   List<String> _audioArguments({
