@@ -76,7 +76,7 @@ class _DownloaderPageState extends State<DownloaderPage> {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<MediaFormat>(
-              value: _format,
+              initialValue: _format,
               decoration: const InputDecoration(
                 labelText: 'Output format',
                 border: OutlineInputBorder(),
