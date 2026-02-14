@@ -64,7 +64,8 @@ class _DownloaderPageState extends State<DownloaderPage> {
             return;
           }
           setState(() {
-            _progress = value.clamp(0.0, 1.0);
+            final double next = value.clamp(0.0, 1.0);
+            _progress = next > _progress ? next : _progress;
             _status = '$stage ${(_progress * 100).toStringAsFixed(0)}%';
           });
         },

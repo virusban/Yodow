@@ -267,11 +267,12 @@ class DownloaderBridge {
         if (await outFile.exists()) {
           await outFile.delete();
         }
-        onProgress?.call(0.0, 'Downloading...');
+        onProgress?.call(0.02, 'Connecting...');
         await _downloadStream(yt, currentStream, outFile, onProgress);
         return;
       } catch (error) {
         lastError = error;
+        onProgress?.call((0.02 * (attempt + 1)).clamp(0.02, 0.1), 'Retrying ($attempt/$maxAttempts)...');
         final String message = error.toString();
         if (message.contains('403') || message.contains('Incomplete download')) {
           final StreamManifest freshManifest =
@@ -315,13 +316,19 @@ class DownloaderBridge {
     int writtenBytes,
     int expectedBytes,
   ) {
-    if (onProgress == null || expectedBytes <= 0) {
+    if (onProgress == null) {
       return;
     }
-    final double ratio = writtenBytes / expectedBytes;
-    final double clamped = ratio.clamp(0.0, 1.0);
-    // Keep room for post-download conversion phase.
-    onProgress(clamped * 0.9, 'Downloading...');
+    if (expectedBytes > 0) {
+      final double ratio = writtenBytes / expectedBytes;
+      final double clamped = ratio.clamp(0.0, 1.0);
+      // Keep room for post-download conversion phase.
+      onProgress(clamped * 0.9, 'Downloading...');
+      return;
+    }
+    // Unknown size fallback: grow smoothly as bytes arrive.
+    final double pseudo = (0.1 + (writtenBytes / (8 * 1024 * 1024))).clamp(0.1, 0.85);
+    onProgress(pseudo, 'Downloading...');
   }
 
   Future<void> _downloadThumbnail(String url, File outFile) async {
