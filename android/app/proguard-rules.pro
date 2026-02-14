@@ -1,0 +1,3 @@
+-keep class io.flutter.** { *; }
+-keep class kotlin.** { *; }
+-dontwarn io.flutter.embedding.**
