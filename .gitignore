@@ -1,0 +1,19 @@
+# Ignore build artifacts
+.dart_tool/
+.packages
+.pub/
+build/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Android
+android/.gradle/
+android/local.properties
+android/**/captures/
+
+# macOS / Windows junk
+.DS_Store
+Thumbs.db
