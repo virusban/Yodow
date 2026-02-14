@@ -25,7 +25,7 @@ class DownloaderBridge {
     final YoutubeExplode yt = YoutubeExplode();
     try {
       final Video video = await yt.videos.get(url);
-      final StreamManifest manifest = await yt.videos.streamsClient.getManifest(video.id);
+      final StreamManifest manifest = await _getRobustManifest(yt, video.id);
       final Directory outDir = Directory(outputDirectoryPath);
       await outDir.create(recursive: true);
       await _assertWritableDirectory(outDir);
@@ -209,7 +209,12 @@ class DownloaderBridge {
   Future<int> _downloadWithDirectHttp(Uri url, File outFile) async {
     final HttpClient client = HttpClient();
     final HttpClientRequest request = await client.getUrl(url);
-    request.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0 (Android)');
+    request.headers.set(HttpHeaders.userAgentHeader, 'Mozilla/5.0');
+    request.headers.set(HttpHeaders.acceptHeader, '*/*');
+    request.headers.set(HttpHeaders.refererHeader, 'https://www.youtube.com/');
+    request.headers.set('origin', 'https://www.youtube.com');
+    request.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
+    request.headers.set(HttpHeaders.rangeHeader, 'bytes=0-');
     final HttpClientResponse response = await request.close();
     if (response.statusCode < 200 || response.statusCode >= 300) {
       client.close(force: true);
@@ -234,18 +239,52 @@ class DownloaderBridge {
   ) async {
     const int maxAttempts = 3;
     Object? lastError;
+    StreamInfo currentStream = stream;
     for (int attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
         if (await outFile.exists()) {
           await outFile.delete();
         }
-        await _downloadStream(yt, stream, outFile);
+        await _downloadStream(yt, currentStream, outFile);
         return;
       } catch (error) {
         lastError = error;
+        final String message = error.toString();
+        if (message.contains('403') || message.contains('Incomplete download')) {
+          final StreamManifest freshManifest =
+              await _getRobustManifest(yt, currentStream.videoId);
+          final StreamInfo? refreshed =
+              _findStreamByTag(freshManifest.streams, currentStream.tag);
+          if (refreshed != null) {
+            currentStream = refreshed;
+          }
+        }
       }
     }
     throw Exception('Download failed after $maxAttempts attempts: $lastError');
+  }
+
+  Future<StreamManifest> _getRobustManifest(
+    YoutubeExplode yt,
+    VideoId videoId,
+  ) {
+    return yt.videos.streamsClient.getManifest(
+      videoId,
+      ytClients: <YoutubeApiClient>[
+        YoutubeApiClient.ios,
+        YoutubeApiClient.android,
+        YoutubeApiClient.tv,
+      ],
+    );
+  }
+
+  StreamInfo? _findStreamByTag(Iterable<StreamInfo> streams, int tag) {
+    for (final StreamInfo stream in streams) {
+      if (stream.tag == tag) {
+        return stream;
+      }
+    }
+    return null;
   }
 
   Future<void> _downloadThumbnail(String url, File outFile) async {
